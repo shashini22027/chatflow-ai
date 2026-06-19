@@ -4,6 +4,7 @@ const cookieParser = require('cookie-parser');
 require('dotenv').config();
 
 const authRoutes = require('./src/routes/authRoutes');
+const chatRoutes = require('./src/routes/chatRoutes');
 
 const app = express();
 
@@ -15,6 +16,7 @@ app.use(express.json());
 app.use(cookieParser());
 
 app.use('/api/auth', authRoutes);
+app.use('/api/chats', chatRoutes);
 
 const PORT = process.env.PORT || 5000;
 app.listen(PORT, () => {
