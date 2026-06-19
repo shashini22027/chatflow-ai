@@ -1,19 +1,30 @@
 import { useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
+import { useAuth } from '../context/AuthContext';
 
 export default function Login() {
     const [email, setEmail] = useState('');
     const [password, setPassword] = useState('');
     const navigate = useNavigate();
+    const { login, guestLogin } = useAuth();
 
-    const handleLogin = (e) => {
+    const handleLogin = async (e) => {
         e.preventDefault();
-        // Integration placeholder
-        navigate('/');
+        try {
+            await login(email, password);
+            navigate('/');
+        } catch (err) {
+            console.error('Login failed', err);
+        }
     };
 
-    const handleGuest = () => {
-        navigate('/');
+    const handleGuest = async () => {
+        try {
+            await guestLogin();
+            navigate('/');
+        } catch (err) {
+            console.error('Guest login failed', err);
+        }
     };
 
     return (

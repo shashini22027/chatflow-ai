@@ -1,16 +1,35 @@
 import { useState, useEffect, useRef } from 'react';
-import { Menu, Plus, MessageSquare, Send, Copy, Edit2, LogOut } from 'lucide-react';
+import { Menu, Plus, MessageSquare, Send, Copy, LogOut } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
+import { useAuth } from '../context/AuthContext';
+import api from '../api';
 
 export default function Home() {
+    const { user, logout } = useAuth();
+    const navigate = useNavigate();
+    
     const [sidebarOpen, setSidebarOpen] = useState(true);
     const [messages, setMessages] = useState([]);
     const [input, setInput] = useState('');
-    const [sessions, setSessions] = useState([
-        { id: '1', title: 'Welcome to NeuroChat', updatedAt: new Date() }
-    ]);
-    const navigate = useNavigate();
+    const [sessions, setSessions] = useState([]);
+    const [currentSessionId, setCurrentSessionId] = useState(null);
     const messagesEndRef = useRef(null);
+
+    useEffect(() => {
+        if (!user) {
+            navigate('/login');
+        } else {
+            fetchSessions();
+        }
+    }, [user, navigate]);
+
+    useEffect(() => {
+        if (currentSessionId) {
+            fetchMessages(currentSessionId);
+        } else {
+            setMessages([]);
+        }
+    }, [currentSessionId]);
 
     const scrollToBottom = () => {
         messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
@@ -20,21 +39,79 @@ export default function Home() {
         scrollToBottom();
     }, [messages]);
 
-    const handleSend = (e) => {
-        e.preventDefault();
-        if (!input.trim()) return;
-        
-        setMessages(prev => [...prev, { id: Date.now(), role: 'user', content: input }]);
-        setInput('');
-        
-        // Mock AI response
-        setTimeout(() => {
-            setMessages(prev => [...prev, { id: Date.now() + 1, role: 'ai', content: 'This is a mock AI response.' }]);
-        }, 1000);
+    const fetchSessions = async () => {
+        try {
+            const res = await api.get('/chats');
+            setSessions(res.data);
+            if (res.data.length > 0 && !currentSessionId) {
+                setCurrentSessionId(res.data[0].id);
+            }
+        } catch (error) {
+            console.error('Error fetching sessions', error);
+        }
     };
 
-    const handleLogout = () => {
-        navigate('/login');
+    const fetchMessages = async (id) => {
+        try {
+            const res = await api.get(`/chats/${id}`);
+            setMessages(res.data.messages || []);
+        } catch (error) {
+            console.error('Error fetching messages', error);
+        }
+    };
+
+    const handleNewChat = async () => {
+        try {
+            const res = await api.post('/chats', { title: 'New Chat' });
+            setSessions([res.data, ...sessions]);
+            setCurrentSessionId(res.data.id);
+        } catch (error) {
+            console.error('Error creating chat', error);
+        }
+    };
+
+    const handleSend = async (e) => {
+        e.preventDefault();
+        if (!input.trim()) return;
+
+        let activeSessionId = currentSessionId;
+        if (!activeSessionId) {
+            try {
+                const res = await api.post('/chats', { title: input.substring(0, 30) });
+                setSessions([res.data, ...sessions]);
+                activeSessionId = res.data.id;
+                setCurrentSessionId(activeSessionId);
+            } catch (error) {
+                console.error('Error creating chat', error);
+                return;
+            }
+        }
+
+        const userMsg = { id: Date.now().toString(), role: 'user', content: input };
+        setMessages(prev => [...prev, userMsg]);
+        setInput('');
+
+        try {
+            const response = await fetch('http://localhost:5000/api/chats/stream', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                },
+                body: JSON.stringify({ sessionId: activeSessionId, content: userMsg.content })
+            });
+            
+            // Temporary mock response for UI until SSE is integrated completely
+            setTimeout(() => {
+                setMessages(prev => [...prev, { id: Date.now().toString(), role: 'ai', content: 'Streaming integration pending...' }]);
+            }, 500);
+
+        } catch (err) {
+            console.error(err);
+        }
+    };
+
+    const handleLogout = async () => {
+        await logout();
     };
 
     return (
@@ -49,7 +126,7 @@ export default function Home() {
                 </div>
                 
                 <div className="flex-1 overflow-y-auto p-4 space-y-2">
-                    <button className="w-full flex items-center gap-3 p-3 bg-primary/10 text-primary hover:bg-primary/20 rounded-lg transition-colors border border-primary/20">
+                    <button onClick={handleNewChat} className="w-full flex items-center gap-3 p-3 bg-primary/10 text-primary hover:bg-primary/20 rounded-lg transition-colors border border-primary/20">
                         <Plus size={20} className="shrink-0" />
                         <span className={`truncate font-medium ${!sidebarOpen ? 'md:hidden' : 'block'}`}>New Chat</span>
                     </button>
@@ -57,7 +134,11 @@ export default function Home() {
                     <div className="mt-6 space-y-1">
                         <div className={`text-xs font-semibold text-textMuted uppercase tracking-wider mb-2 px-2 ${!sidebarOpen ? 'md:hidden' : 'block'}`}>Recent</div>
                         {sessions.map(session => (
-                            <button key={session.id} className="w-full flex items-center gap-3 p-3 hover:bg-gray-800 rounded-lg transition-colors text-left group">
+                            <button 
+                                key={session.id} 
+                                onClick={() => setCurrentSessionId(session.id)}
+                                className={`w-full flex items-center gap-3 p-3 rounded-lg transition-colors text-left group ${currentSessionId === session.id ? 'bg-gray-800' : 'hover:bg-gray-800/50'}`}
+                            >
                                 <MessageSquare size={20} className="text-textMuted shrink-0 group-hover:text-textMain transition-colors" />
                                 <span className={`truncate text-sm ${!sidebarOpen ? 'md:hidden' : 'block'}`}>{session.title}</span>
                             </button>
@@ -66,6 +147,9 @@ export default function Home() {
                 </div>
 
                 <div className="p-4 border-t border-gray-800">
+                    <div className={`mb-4 px-3 text-sm text-textMuted truncate ${!sidebarOpen ? 'md:hidden' : 'block'}`}>
+                        {user?.name}
+                    </div>
                     <button onClick={handleLogout} className="w-full flex items-center gap-3 p-3 hover:bg-gray-800 rounded-lg transition-colors text-left text-red-400 hover:text-red-300">
                         <LogOut size={20} className="shrink-0" />
                         <span className={`truncate text-sm font-medium ${!sidebarOpen ? 'md:hidden' : 'block'}`}>Logout</span>
