@@ -97,14 +97,49 @@ export default function Home() {
                 headers: {
                     'Content-Type': 'application/json',
                 },
-                body: JSON.stringify({ sessionId: activeSessionId, content: userMsg.content })
+                body: JSON.stringify({ sessionId: activeSessionId, content: userMsg.content }),
+                credentials: 'include'
             });
             
-            // Temporary mock response for UI until SSE is integrated completely
-            setTimeout(() => {
-                setMessages(prev => [...prev, { id: Date.now().toString(), role: 'ai', content: 'Streaming integration pending...' }]);
-            }, 500);
+            const reader = response.body.getReader();
+            const decoder = new TextDecoder('utf-8');
+            let aiMessageContent = '';
+            
+            const aiMsgId = Date.now().toString() + 1;
+            setMessages(prev => [...prev, { id: aiMsgId, role: 'ai', content: '' }]);
 
+            let buffer = '';
+            while (true) {
+                const { done, value } = await reader.read();
+                if (done) break;
+                
+                buffer += decoder.decode(value, { stream: true });
+                const lines = buffer.split('\n\n');
+                
+                buffer = lines.pop() || ''; // keep the incomplete part in buffer
+                
+                for (const line of lines) {
+                    if (line.startsWith('data: ')) {
+                        const dataStr = line.replace('data: ', '');
+                        if (dataStr === '[DONE]') {
+                            break;
+                        }
+                        try {
+                            const data = JSON.parse(dataStr);
+                            if (data.text) {
+                                aiMessageContent += data.text;
+                                setMessages(prev => prev.map(msg => 
+                                    msg.id === aiMsgId ? { ...msg, content: aiMessageContent } : msg
+                                ));
+                            } else if (data.error) {
+                                console.error(data.error);
+                            }
+                        } catch (e) {
+                            console.error('Error parsing SSE data', e);
+                        }
+                    }
+                }
+            }
         } catch (err) {
             console.error(err);
         }
