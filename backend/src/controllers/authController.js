@@ -26,6 +26,7 @@ exports.register = async (req, res) => {
         res.cookie('token', token, { httpOnly: true });
         res.status(201).json({ user: { id: user.id, email: user.email, name: user.name, isGuest: user.isGuest } });
     } catch (error) {
+        console.error('Register error:', error);
         res.status(500).json({ error: 'Server error' });
     }
 };
