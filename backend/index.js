@@ -5,6 +5,7 @@ require('dotenv').config();
 
 const authRoutes = require('./src/routes/authRoutes');
 const chatRoutes = require('./src/routes/chatRoutes');
+const connectDB = require('./src/config/db');
 
 const app = express();
 
@@ -19,6 +20,13 @@ app.use('/api/auth', authRoutes);
 app.use('/api/chats', chatRoutes);
 
 const PORT = process.env.PORT || 5000;
-app.listen(PORT, () => {
-    console.log(`Server is running on port ${PORT}`);
-});
+connectDB()
+    .then(() => {
+        app.listen(PORT, () => {
+            console.log(`Server is running on port ${PORT}`);
+        });
+    })
+    .catch((error) => {
+        console.error('MongoDB connection error:', error.message);
+        process.exit(1);
+    });

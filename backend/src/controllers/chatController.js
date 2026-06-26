@@ -1,12 +1,9 @@
-const { PrismaClient } = require('@prisma/client');
-const prisma = new PrismaClient();
+const ChatSession = require('../models/ChatSession');
+const Message = require('../models/Message');
 
 exports.getSessions = async (req, res) => {
     try {
-        const sessions = await prisma.chatSession.findMany({
-            where: { userId: req.user.userId },
-            orderBy: { updatedAt: 'desc' }
-        });
+        const sessions = await ChatSession.find({ userId: req.user.userId }).sort({ updatedAt: -1 });
         res.json(sessions);
     } catch (error) {
         res.status(500).json({ error: 'Server error' });
@@ -15,15 +12,14 @@ exports.getSessions = async (req, res) => {
 
 exports.getSession = async (req, res) => {
     try {
-        const session = await prisma.chatSession.findUnique({
-            where: { id: req.params.id },
-            include: { messages: { orderBy: { createdAt: 'asc' } } }
-        });
+        const session = await ChatSession.findById(req.params.id);
         
-        if (!session || session.userId !== req.user.userId) {
+        if (!session || session.userId.toString() !== req.user.userId) {
             return res.status(404).json({ error: 'Session not found' });
         }
-        res.json(session);
+
+        const messages = await Message.find({ sessionId: session.id }).sort({ createdAt: 1 });
+        res.json({ ...session.toJSON(), messages });
     } catch (error) {
         res.status(500).json({ error: 'Server error' });
     }
@@ -32,11 +28,9 @@ exports.getSession = async (req, res) => {
 exports.createSession = async (req, res) => {
     try {
         const { title } = req.body;
-        const session = await prisma.chatSession.create({
-            data: {
-                userId: req.user.userId,
-                title: title || 'New Chat'
-            }
+        const session = await ChatSession.create({
+            userId: req.user.userId,
+            title: title || 'New Chat'
         });
         res.status(201).json(session);
     } catch (error) {
@@ -46,13 +40,13 @@ exports.createSession = async (req, res) => {
 
 exports.deleteSession = async (req, res) => {
     try {
-        const session = await prisma.chatSession.findUnique({ where: { id: req.params.id } });
-        if (!session || session.userId !== req.user.userId) {
+        const session = await ChatSession.findById(req.params.id);
+        if (!session || session.userId.toString() !== req.user.userId) {
             return res.status(404).json({ error: 'Session not found' });
         }
         
-        await prisma.message.deleteMany({ where: { sessionId: req.params.id } });
-        await prisma.chatSession.delete({ where: { id: req.params.id } });
+        await Message.deleteMany({ sessionId: req.params.id });
+        await ChatSession.findByIdAndDelete(req.params.id);
         
         res.json({ message: 'Session deleted' });
     } catch (error) {
@@ -63,15 +57,16 @@ exports.deleteSession = async (req, res) => {
 exports.updateSession = async (req, res) => {
     try {
         const { title } = req.body;
-        const session = await prisma.chatSession.findUnique({ where: { id: req.params.id } });
-        if (!session || session.userId !== req.user.userId) {
+        const session = await ChatSession.findById(req.params.id);
+        if (!session || session.userId.toString() !== req.user.userId) {
             return res.status(404).json({ error: 'Session not found' });
         }
         
-        const updatedSession = await prisma.chatSession.update({
-            where: { id: req.params.id },
-            data: { title }
-        });
+        const updatedSession = await ChatSession.findByIdAndUpdate(
+            req.params.id,
+            { title },
+            { new: true, runValidators: true }
+        );
         res.json(updatedSession);
     } catch (error) {
         res.status(500).json({ error: 'Server error' });
@@ -85,15 +80,20 @@ exports.searchChats = async (req, res) => {
             return res.json([]);
         }
 
-        const messages = await prisma.message.findMany({
-            where: {
-                session: { userId: req.user.userId },
-                content: { contains: query }
-            },
-            include: { session: true },
-            orderBy: { createdAt: 'desc' }
-        });
-        res.json(messages);
+        const sessions = await ChatSession.find({ userId: req.user.userId }).select('_id');
+        const sessionIds = sessions.map((session) => session._id);
+        const messages = await Message.find({
+            sessionId: { $in: sessionIds },
+            content: { $regex: query, $options: 'i' }
+        })
+            .populate('sessionId')
+            .sort({ createdAt: -1 });
+
+        res.json(messages.map((message) => ({
+            ...message.toJSON(),
+            session: message.sessionId?.toJSON(),
+            sessionId: message.sessionId?.id || message.sessionId
+        })));
     } catch (error) {
         res.status(500).json({ error: 'Server error' });
     }

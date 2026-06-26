@@ -1,8 +1,7 @@
-const { PrismaClient } = require('@prisma/client');
 const bcrypt = require('bcryptjs');
 const jwt = require('jsonwebtoken');
+const User = require('../models/User');
 
-const prisma = new PrismaClient();
 const JWT_SECRET = process.env.JWT_SECRET || 'secret';
 
 exports.register = async (req, res) => {
@@ -12,15 +11,13 @@ exports.register = async (req, res) => {
             return res.status(400).json({ error: 'All fields are required' });
         }
         
-        const existingUser = await prisma.user.findUnique({ where: { email } });
+        const existingUser = await User.findOne({ email });
         if (existingUser) {
             return res.status(400).json({ error: 'Email already exists' });
         }
 
         const hashedPassword = await bcrypt.hash(password, 10);
-        const user = await prisma.user.create({
-            data: { email, password: hashedPassword, name }
-        });
+        const user = await User.create({ email, password: hashedPassword, name });
 
         const token = jwt.sign({ userId: user.id }, JWT_SECRET, { expiresIn: '7d' });
         res.cookie('token', token, { httpOnly: true });
@@ -34,7 +31,7 @@ exports.register = async (req, res) => {
 exports.login = async (req, res) => {
     try {
         const { email, password } = req.body;
-        const user = await prisma.user.findUnique({ where: { email } });
+        const user = await User.findOne({ email });
         if (!user) {
             return res.status(400).json({ error: 'Invalid credentials' });
         }
@@ -54,9 +51,7 @@ exports.login = async (req, res) => {
 
 exports.guestLogin = async (req, res) => {
     try {
-        const user = await prisma.user.create({
-            data: { isGuest: true, name: 'Guest User' }
-        });
+        const user = await User.create({ isGuest: true, name: 'Guest User' });
 
         const token = jwt.sign({ userId: user.id }, JWT_SECRET, { expiresIn: '24h' });
         res.cookie('token', token, { httpOnly: true });

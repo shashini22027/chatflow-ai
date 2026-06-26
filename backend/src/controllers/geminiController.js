@@ -1,7 +1,7 @@
-const { PrismaClient } = require('@prisma/client');
 const { GoogleGenerativeAI } = require('@google/generative-ai');
+const ChatSession = require('../models/ChatSession');
+const Message = require('../models/Message');
 
-const prisma = new PrismaClient();
 // Fallback key is empty so we don't crash before it's provided in .env
 const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY || '');
 
@@ -13,19 +13,16 @@ exports.streamChat = async (req, res) => {
             return res.status(400).json({ error: 'sessionId and content are required' });
         }
 
-        const session = await prisma.chatSession.findUnique({
-            where: { id: sessionId },
-            include: { messages: { orderBy: { createdAt: 'asc' } } }
-        });
+        const session = await ChatSession.findById(sessionId);
 
-        if (!session || session.userId !== req.user.userId) {
+        if (!session || session.userId.toString() !== req.user.userId) {
             return res.status(404).json({ error: 'Session not found' });
         }
 
+        const messages = await Message.find({ sessionId }).sort({ createdAt: 1 });
+
         // Save user message
-        await prisma.message.create({
-            data: { sessionId, role: 'user', content }
-        });
+        await Message.create({ sessionId, role: 'user', content });
 
         // Set headers for SSE
         res.setHeader('Content-Type', 'text/event-stream');
@@ -34,7 +31,7 @@ exports.streamChat = async (req, res) => {
         res.flushHeaders();
 
         // Format history for Gemini
-        const history = session.messages.map(msg => ({
+        const history = messages.map(msg => ({
             role: msg.role === 'user' ? 'user' : 'model',
             parts: [{ text: msg.content }]
         }));
@@ -59,9 +56,8 @@ exports.streamChat = async (req, res) => {
         }
 
         // Save AI response
-        await prisma.message.create({
-            data: { sessionId, role: 'ai', content: fullAiResponse }
-        });
+        await Message.create({ sessionId, role: 'ai', content: fullAiResponse });
+        await ChatSession.findByIdAndUpdate(sessionId, { updatedAt: new Date() });
 
         res.write('data: [DONE]\n\n');
         res.end();
